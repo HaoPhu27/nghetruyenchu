@@ -4,6 +4,11 @@ import { TTSModelConfig, WorkerInMessage, WorkerOutMessage } from '@/types';
 let session: ort.InferenceSession | null = null;
 let modelConfig: TTSModelConfig | null = null;
 
+// Set local WASM path matching installed package onnxruntime-web@1.27.0
+ort.env.wasm.wasmPaths = '/wasm/';
+ort.env.wasm.numThreads = 1;
+ort.env.wasm.simd = true;
+
 // Map character/phoneme string into array of phoneme ID numbers
 function textToPhonemeIds(text: string, config: TTSModelConfig): number[] {
   const map = config.phoneme_id_map;
@@ -49,11 +54,6 @@ self.onmessage = async (event: MessageEvent<WorkerInMessage>) => {
 
       const buffer = await modelRes.arrayBuffer();
       postMessage({ type: 'progress', loaded: buffer.byteLength, total: buffer.byteLength } as WorkerOutMessage);
-
-      // Configure ONNX Runtime Web for stable single-thread WASM execution
-      ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/';
-      ort.env.wasm.numThreads = 1;
-      ort.env.wasm.simd = true;
 
       session = await ort.InferenceSession.create(buffer, {
         executionProviders: ['wasm'],
@@ -102,11 +102,26 @@ self.onmessage = async (event: MessageEvent<WorkerInMessage>) => {
         [3]
       );
 
-      const feeds: Record<string, ort.Tensor> = {
-        input: inputTensor,
-        input_lengths: inputLengthsTensor,
-        scales: scalesTensor,
-      };
+      const feeds: Record<string, ort.Tensor> = {};
+      const inputNames = session.inputNames;
+
+      for (const name of inputNames) {
+        if (name === 'input' || name === 'text') {
+          feeds[name] = inputTensor;
+        } else if (name === 'input_lengths' || name === 'text_lengths') {
+          feeds[name] = inputLengthsTensor;
+        } else if (name === 'scales') {
+          feeds[name] = scalesTensor;
+        } else if (name === 'sid') {
+          feeds[name] = new ort.Tensor('int64', BigInt64Array.from([BigInt(0)]), [1]);
+        }
+      }
+
+      if (Object.keys(feeds).length === 0) {
+        feeds['input'] = inputTensor;
+        feeds['input_lengths'] = inputLengthsTensor;
+        feeds['scales'] = scalesTensor;
+      }
 
       const results = await session.run(feeds);
 

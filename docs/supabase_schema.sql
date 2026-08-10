@@ -1,6 +1,7 @@
 -- ========================================================
 -- SUPABASE DATABASE & STORAGE MIGRATION FOR NGHE TRUYEN CHU
--- Run this in your Supabase SQL Editor
+-- Run this script in your Supabase SQL Editor:
+-- https://supabase.com/dashboard/project/_/sql/new
 -- ========================================================
 
 -- 1. Create table `novels`
@@ -32,22 +33,32 @@ CREATE TABLE IF NOT EXISTS user_progress (
 ALTER TABLE novels ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_progress ENABLE ROW LEVEL SECURITY;
 
--- 4. RLS Policies
-CREATE POLICY "Users can CRUD own novels"
+-- 4. RLS Policies (Allow Public / Guest Uploads & Reads)
+DROP POLICY IF EXISTS "Users can CRUD own novels" ON novels;
+DROP POLICY IF EXISTS "Allow public all on novels" ON novels;
+CREATE POLICY "Allow public all on novels"
   ON novels FOR ALL
-  USING (auth.uid() = user_id OR user_id IS NULL)
-  WITH CHECK (auth.uid() = user_id OR user_id IS NULL);
+  USING (true)
+  WITH CHECK (true);
 
-CREATE POLICY "Users can CRUD own progress"
+DROP POLICY IF EXISTS "Users can CRUD own progress" ON user_progress;
+DROP POLICY IF EXISTS "Allow public all on progress" ON user_progress;
+CREATE POLICY "Allow public all on progress"
   ON user_progress FOR ALL
-  USING (auth.uid() = user_id OR user_id IS NULL)
-  WITH CHECK (auth.uid() = user_id OR user_id IS NULL);
+  USING (true)
+  WITH CHECK (true);
 
 -- 5. Create Indexes
 CREATE INDEX IF NOT EXISTS idx_novels_user ON novels(user_id);
 CREATE INDEX IF NOT EXISTS idx_progress_user_novel ON user_progress(user_id, novel_id);
 
--- 6. Storage Buckets (Execute in Supabase Storage or via SQL if storage schema enabled)
--- Create bucket 'novels' (private or public)
--- Create bucket 'covers' (public)
--- Create bucket 'tts-models' (public)
+-- 6. Storage Buckets and Public RLS Access Policies
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('novels', 'novels', true), ('covers', 'covers', true)
+ON CONFLICT (id) DO UPDATE SET public = true;
+
+DROP POLICY IF EXISTS "Public access to novels bucket" ON storage.objects;
+CREATE POLICY "Public access to novels bucket"
+  ON storage.objects FOR ALL
+  USING (bucket_id IN ('novels', 'covers'))
+  WITH CHECK (bucket_id IN ('novels', 'covers'));

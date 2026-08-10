@@ -63,94 +63,104 @@ export async function uploadNovel(
 ): Promise<Novel> {
   const fileId = crypto.randomUUID();
 
-  if (!isSupabaseConfigured()) {
-    // Save raw file in IndexedDB for permanent local storage across reloads
-    await saveLocalFile(fileId, file);
+  if (isSupabaseConfigured()) {
+    try {
+      const supabase = createClient();
+      const { data: userData } = await supabase.auth.getUser();
+      const userId = userData.user?.id || null;
 
-    let coverUrl: string | undefined = undefined;
-    if (meta.coverBlob) {
-      const coverId = `cover_${fileId}`;
-      await saveLocalFile(coverId, meta.coverBlob);
-      coverUrl = `indexeddb://${coverId}`;
+      const fileExt = file.name.split('.').pop();
+      const storageFilePath = `${fileId}.${fileExt}`;
+
+      // 1. Upload EPUB to Supabase storage 'novels' bucket
+      const { error: uploadError } = await supabase.storage
+        .from('novels')
+        .upload(storageFilePath, file, {
+          contentType: 'application/epub+zip',
+          upsert: false,
+        });
+
+      if (uploadError) throw uploadError;
+
+      const { data: fileData } = supabase.storage
+        .from('novels')
+        .getPublicUrl(storageFilePath);
+
+      let coverUrl: string | undefined = undefined;
+
+      // 2. Upload cover if available to 'covers' bucket
+      if (meta.coverBlob) {
+        const coverPath = `${fileId}.jpg`;
+        const { error: coverError } = await supabase.storage
+          .from('covers')
+          .upload(coverPath, meta.coverBlob, {
+            contentType: 'image/jpeg',
+            upsert: true,
+          });
+
+        if (!coverError) {
+          const { data: cData } = supabase.storage
+            .from('covers')
+            .getPublicUrl(coverPath);
+          coverUrl = cData.publicUrl;
+        }
+      }
+
+      // 3. Insert record into novels table
+      const newNovel: Partial<Novel> = {
+        id: fileId,
+        user_id: userId || undefined,
+        title: meta.title || file.name.replace(/\.epub$/i, ''),
+        author: meta.author || 'Chưa rõ',
+        cover_url: coverUrl,
+        file_url: fileData.publicUrl,
+        file_size: file.size,
+        chapter_count: meta.chapterCount || 0,
+      };
+
+      const { data, error } = await supabase
+        .from('novels')
+        .insert(newNovel)
+        .select()
+        .single();
+
+      if (!error && data) {
+        return data as Novel;
+      }
+      console.warn('Supabase insert failed (RLS or database error), falling back to local IndexedDB:', error);
+    } catch (err) {
+      console.warn('Supabase upload failed, falling back to local IndexedDB:', err);
     }
-
-    const newNovel: Novel = {
-      id: fileId,
-      title: meta.title || file.name.replace(/\.epub$/i, ''),
-      author: meta.author || 'Chưa rõ',
-      cover_url: coverUrl,
-      file_url: `indexeddb://${fileId}`,
-      file_size: file.size,
-      chapter_count: meta.chapterCount || 0,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-
-    const local = localStorage.getItem(LOCAL_STORAGE_NOVELS_KEY);
-    const novels: Novel[] = local ? JSON.parse(local) : [];
-    novels.unshift(newNovel);
-    localStorage.setItem(LOCAL_STORAGE_NOVELS_KEY, JSON.stringify(novels));
-
-    return newNovel;
   }
 
-  const supabase = createClient();
-  const fileExt = file.name.split('.').pop();
-  const storageFilePath = `${fileId}.${fileExt}`;
-
-  // 1. Upload EPUB to Supabase storage 'novels' bucket
-  const { error: uploadError } = await supabase.storage
-    .from('novels')
-    .upload(storageFilePath, file, {
-      contentType: 'application/epub+zip',
-      upsert: false,
-    });
-
-  if (uploadError) throw uploadError;
-
-  const { data: fileData } = supabase.storage
-    .from('novels')
-    .getPublicUrl(storageFilePath);
+  // Local storage fallback (IndexedDB for raw EPUB file + localStorage for novel metadata)
+  await saveLocalFile(fileId, file);
 
   let coverUrl: string | undefined = undefined;
-
-  // 2. Upload cover if available to 'covers' bucket
   if (meta.coverBlob) {
-    const coverPath = `${fileId}.jpg`;
-    const { error: coverError } = await supabase.storage
-      .from('covers')
-      .upload(coverPath, meta.coverBlob, {
-        contentType: 'image/jpeg',
-        upsert: true,
-      });
-
-    if (!coverError) {
-      const { data: cData } = supabase.storage
-        .from('covers')
-        .getPublicUrl(coverPath);
-      coverUrl = cData.publicUrl;
-    }
+    const coverId = `cover_${fileId}`;
+    await saveLocalFile(coverId, meta.coverBlob);
+    coverUrl = `indexeddb://${coverId}`;
   }
 
-  // 3. Insert record into novels table
-  const newNovel: Partial<Novel> = {
+  const localNovel: Novel = {
     id: fileId,
     title: meta.title || file.name.replace(/\.epub$/i, ''),
     author: meta.author || 'Chưa rõ',
     cover_url: coverUrl,
-    file_url: fileData.publicUrl,
+    file_url: `indexeddb://${fileId}`,
     file_size: file.size,
     chapter_count: meta.chapterCount || 0,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
   };
 
-  const { data, error } = await supabase
-    .from('novels')
-    .insert(newNovel)
-    .select()
-    .single();
+  const local = localStorage.getItem(LOCAL_STORAGE_NOVELS_KEY);
+  const novels: Novel[] = local ? JSON.parse(local) : [];
+  novels.unshift(localNovel);
+  localStorage.setItem(LOCAL_STORAGE_NOVELS_KEY, JSON.stringify(novels));
 
-  if (error) throw error;
-  return data as Novel;
+  return localNovel;
 }
 
 // Universal binary fetcher: retrieves ArrayBuffer from IndexedDB (local mode) or HTTP URL (Supabase)
