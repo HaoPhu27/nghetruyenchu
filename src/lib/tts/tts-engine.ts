@@ -33,6 +33,7 @@ class TTSEngine {
         this.handleAudioReceived(msg.id, msg.buffer, msg.sampleRate);
       } else if (msg.type === 'error') {
         console.error('TTS Worker error:', msg.message);
+        this.isSynthesizing = false;
         if (useTTSStore.getState().modelStatus !== 'ready') {
           useTTSStore.getState().setModelStatus('error', 0, msg.message);
         }

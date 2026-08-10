@@ -7,11 +7,12 @@ import { useTTSStore } from '@/lib/store/tts-store';
 
 interface EpubViewerProps {
   book: Book | null;
+  currentChapterHref?: string;
   initialCfi?: string | null;
   onLocationChange?: (cfi: string) => void;
 }
 
-export function EpubViewer({ book, initialCfi, onLocationChange }: EpubViewerProps) {
+export function EpubViewer({ book, currentChapterHref, initialCfi, onLocationChange }: EpubViewerProps) {
   const viewerRef = useRef<HTMLDivElement>(null);
   const renditionRef = useRef<Rendition | null>(null);
   const { theme, fontSize } = useReaderStore();
@@ -31,7 +32,9 @@ export function EpubViewer({ book, initialCfi, onLocationChange }: EpubViewerPro
 
     renditionRef.current = rendition;
 
-    if (initialCfi) {
+    if (currentChapterHref) {
+      rendition.display(currentChapterHref);
+    } else if (initialCfi) {
       rendition.display(initialCfi);
     } else {
       rendition.display();
@@ -45,8 +48,15 @@ export function EpubViewer({ book, initialCfi, onLocationChange }: EpubViewerPro
 
     return () => {
       rendition.destroy();
+      renditionRef.current = null;
     };
-  }, [book, initialCfi, onLocationChange]);
+  }, [book]);
+
+  // Navigate to new chapter when currentChapterHref changes
+  useEffect(() => {
+    if (!renditionRef.current || !currentChapterHref) return;
+    renditionRef.current.display(currentChapterHref);
+  }, [currentChapterHref]);
 
   // Apply theme & font size updates
   useEffect(() => {
@@ -62,17 +72,35 @@ export function EpubViewer({ book, initialCfi, onLocationChange }: EpubViewerPro
     const currentColors = themeColors[theme] || themeColors.dark;
 
     renditionRef.current.themes.default({
+      '*': {
+        color: `${currentColors.text} !important`,
+        'background-color': 'transparent !important',
+      },
       body: {
         background: `${currentColors.bg} !important`,
         color: `${currentColors.text} !important`,
-        'font-family': 'var(--font-serif), Georgia, serif !important',
+        'font-family': 'var(--font-serif), Georgia, System-UI, sans-serif !important',
         'font-size': `${fontSize}px !important`,
         'line-height': '1.7 !important',
-        padding: '20px 40px !important',
+        padding: '24px 32px !important',
       },
       p: {
+        color: `${currentColors.text} !important`,
         'margin-bottom': '1.2em !important',
       },
+      div: {
+        color: `${currentColors.text} !important`,
+      },
+      span: {
+        color: `${currentColors.text} !important`,
+      },
+      a: {
+        color: '#eab308 !important',
+      },
+      h1: { color: `${currentColors.text} !important` },
+      h2: { color: `${currentColors.text} !important` },
+      h3: { color: `${currentColors.text} !important` },
+      h4: { color: `${currentColors.text} !important` },
     });
   }, [theme, fontSize]);
 

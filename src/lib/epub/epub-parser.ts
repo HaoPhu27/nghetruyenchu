@@ -81,12 +81,23 @@ export async function getChapterText(book: Book, href: string): Promise<string> 
     const loadedSection = await section.load(book.load.bind(book));
     if (!loadedSection) return '';
 
-    // Create temporary element to parse DOM and extract text
-    if (typeof document !== 'undefined') {
-      const htmlContent = typeof loadedSection === 'string' ? loadedSection : (loadedSection as unknown as Element).outerHTML || '';
-      const doc = new DOMParser().parseFromString(htmlContent, 'text/html');
-      return doc.body.textContent || doc.body.innerText || '';
+    if (typeof loadedSection === 'string') {
+      const doc = new DOMParser().parseFromString(loadedSection, 'text/html');
+      return doc.body?.textContent || doc.body?.innerText || '';
     }
+
+    if (typeof document !== 'undefined') {
+      if (loadedSection instanceof Document || (loadedSection as Document).body) {
+        const doc = loadedSection as Document;
+        return doc.body?.textContent || doc.body?.innerText || doc.documentElement?.textContent || '';
+      }
+
+      if ((loadedSection as Element).outerHTML) {
+        const doc = new DOMParser().parseFromString((loadedSection as Element).outerHTML, 'text/html');
+        return doc.body?.textContent || '';
+      }
+    }
+
     return '';
   } catch (error) {
     console.error('Error fetching chapter text:', error);

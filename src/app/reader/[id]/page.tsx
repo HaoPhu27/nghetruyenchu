@@ -116,10 +116,6 @@ export default function ReaderPage({ params }: PageProps) {
 
   const handleSelectChapter = (chap: ChapterItem) => {
     setCurrentChapterIndex(chap.index);
-    if (book) {
-      (book as unknown as { rendition?: { display: (href: string) => void } }).rendition?.display(chap.href);
-    }
-
     updateProgress(null, chap.index, 0, true);
   };
 
@@ -232,6 +228,7 @@ export default function ReaderPage({ params }: PageProps) {
         <div className="flex-1 border border-zinc-800/80 rounded-2xl overflow-hidden shadow-2xl">
           <EpubViewer
             book={book}
+            currentChapterHref={currentChapter?.href}
             initialCfi={progress?.location_cfi}
             onLocationChange={handleLocationChange}
           />

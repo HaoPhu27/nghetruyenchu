@@ -36,45 +36,26 @@ self.onmessage = async (event: MessageEvent<WorkerInMessage>) => {
     try {
       // Fetch model config JSON
       const configRes = await fetch(msg.configUrl);
+      if (!configRes.ok) {
+        throw new Error(`Không thể tải cấu hình giọng đọc (${configRes.status})`);
+      }
       modelConfig = (await configRes.json()) as TTSModelConfig;
 
-      // Fetch ONNX model binary with progress reporting
+      // Fetch ONNX model binary directly as ArrayBuffer to avoid memory duplication
       const modelRes = await fetch(msg.modelUrl);
-      const contentLength = modelRes.headers.get('content-length');
-      const total = contentLength ? parseInt(contentLength, 10) : 0;
-      let loaded = 0;
-
-      const reader = modelRes.body?.getReader();
-      const chunks: Uint8Array[] = [];
-
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          if (value) {
-            chunks.push(value);
-            loaded += value.length;
-            if (total > 0) {
-              const progress = Math.round((loaded / total) * 100);
-              postMessage({ type: 'progress', loaded, total } as WorkerOutMessage);
-            }
-          }
-        }
+      if (!modelRes.ok) {
+        throw new Error(`Không thể tải mô hình giọng đọc (${modelRes.status})`);
       }
 
-      // Combine chunks into ArrayBuffer
-      const combined = new Uint8Array(loaded);
-      let offset = 0;
-      for (const chunk of chunks) {
-        combined.set(chunk, offset);
-        offset += chunk.length;
-      }
+      const buffer = await modelRes.arrayBuffer();
+      postMessage({ type: 'progress', loaded: buffer.byteLength, total: buffer.byteLength } as WorkerOutMessage);
 
-      // Configure ONNX Runtime Web WASM options
-      ort.env.wasm.numThreads = 2;
+      // Configure ONNX Runtime Web for stable single-thread WASM execution
+      ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/';
+      ort.env.wasm.numThreads = 1;
       ort.env.wasm.simd = true;
 
-      session = await ort.InferenceSession.create(combined.buffer, {
+      session = await ort.InferenceSession.create(buffer, {
         executionProviders: ['wasm'],
       });
 
@@ -133,12 +114,15 @@ self.onmessage = async (event: MessageEvent<WorkerInMessage>) => {
       const outputTensor = results.output || Object.values(results)[0];
       const audioBuffer = outputTensor.data as Float32Array;
 
-      postMessage({
-        type: 'audio',
-        id: msg.id,
-        buffer: audioBuffer,
-        sampleRate: modelConfig.audio.sample_rate,
-      } as WorkerOutMessage);
+      (postMessage as (message: unknown, transfer?: Transferable[]) => void)(
+        {
+          type: 'audio',
+          id: msg.id,
+          buffer: audioBuffer,
+          sampleRate: modelConfig.audio.sample_rate,
+        } as WorkerOutMessage,
+        [audioBuffer.buffer]
+      );
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : 'Lỗi tổng hợp giọng nói';
       postMessage({ type: 'error', id: msg.id, message: errorMessage } as WorkerOutMessage);
