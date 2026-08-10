@@ -1,5 +1,6 @@
 # 🎧 Nghe Truyện Chữ — Web App Đọc & Nghe Truyện AI (100% Client-Side TTS)
 
+
 Web App đọc truyện chữ định dạng **EPUB** và nghe đọc bằng trí tuệ nhân tạo (AI Text-To-Speech giọng đọc **Ngọc Huyền**). Hệ thống xử lý tổng hợp âm thanh 100% trên trình duyệt người dùng bằng **WebAssembly (WASM)**, đồng thời hỗ trợ lưu trữ cục bộ persistent (IndexedDB) và đồng bộ Cloud (Supabase).
 
 ---
@@ -77,3 +78,4 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 └── docs/
     └── supabase_schema.sql             # SQL script cho Supabase database & storage
 ```
+
