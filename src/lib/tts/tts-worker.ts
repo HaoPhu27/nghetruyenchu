@@ -51,7 +51,7 @@ const TONE_DIGIT: Record<string, string> = {
 // Initial consonant clusters -> IPA (greedy longest-match)
 const INIT_CONS: [string, string][] = [
   ['ngh','ŋ'],['ng','ŋ'],['nh','ɲ'],['ch','c'],
-  ['ph','f'],['kh','x'],['gh','ɣ'],['gi','z'],['qu','k'],
+  ['ph','f'],['kh','x'],['gh','ɣ'],['gi','z'],['qu','kw'],
   ['tr','ʈ'],['th','tʰ'],
   ['đ','ɗ'],['b','ɓ'],['c','k'],['d','z'],['g','ɣ'],
   ['h','h'],['k','k'],['l','l'],['m','m'],['n','n'],
@@ -71,7 +71,7 @@ function isVowel(c: string): boolean {
 /**
  * Convert Vietnamese text to a flat array of phoneme IDs for Piper TTS.
  * Each word is processed syllable by syllable.
- * Structure per syllable: [init_ipa*] [vowel_ipa+] [tone_digit] [final_ipa*]
+ * Structure per syllable: [init_ipa*] [vowel_ipa+] [final_ipa*] [tone_digit]
  */
 function textToPhonemeIds(text: string, config: TTSModelConfig): number[] {
   const pm = config.phoneme_id_map;
@@ -91,20 +91,33 @@ function textToPhonemeIds(text: string, config: TTSModelConfig): number[] {
   for (let wi = 0; wi < words.length; wi++) {
     const word = words[wi];
     // Strip non-Vietnamese characters
-    const cleanWord = word.replace(/[^a-zàáảãạăằắẳẵặâầấẩẫậeèéẻẽẹêềếểễệiìíỉĩịoòóỏõọôồốổỗộơờớởỡợuùúủũụưừứửữựyỳýỷỹỵđ]/g, '');
+    let cleanWord = word.replace(/[^a-zàáảãạăằắẳẵặâầấẩẫậeèéẻẽẹêềếểễệiìíỉĩịoòóỏõọôồốổỗộơờớởỡợuùúủũụưừứửữựyỳýỷỹỵđ]/g, '');
     if (!cleanWord) continue;
+
+    // Quick phonetic patches for specific tricky spellings before processing
+    if (cleanWord.startsWith('gi') && cleanWord.length > 2 && isVowel(cleanWord[2])) {
+        // "gia" -> "za", 'i' is silent
+        cleanWord = 'z' + cleanWord.slice(2);
+    } else if (['gì', 'gí', 'gỉ', 'gĩ', 'gị', 'gi'].includes(cleanWord)) {
+        cleanWord = 'z' + cleanWord.slice(1);
+    } else if (cleanWord.startsWith('gi')) {
+        cleanWord = 'z' + cleanWord.slice(1);
+    }
 
     let i = 0;
     const w = cleanWord;
 
+    let currentSyllableTone = '1';
+    let syllableVowelFound = false;
+
     // Process word character by character (syllable components)
     while (i < w.length) {
-      // 1. Initial consonant (greedy longest match, must not start with vowel)
+      // 1. Initial consonant (greedy longest match, must not start with vowel except for 'qu' which expands to kw)
       let initFound = false;
       for (const [graph, ipa] of INIT_CONS) {
         if (i + graph.length <= w.length &&
           w.slice(i, i + graph.length) === graph &&
-          !isVowel(graph[0])) {
+          (!isVowel(graph[0]) || graph === 'qu')) {
           addPhoneme(ipa);
           i += graph.length;
           initFound = true;
@@ -120,17 +133,16 @@ function textToPhonemeIds(text: string, config: TTSModelConfig): number[] {
       }
 
       if (vowelChars.length > 0) {
+        syllableVowelFound = true;
         // Determine tone from the marked character
         const tonedChar = vowelChars.find(c => TONE_DIGIT[c] && TONE_DIGIT[c] !== '1') ?? vowelChars[0];
-        const tone = TONE_DIGIT[tonedChar] ?? '1';
+        currentSyllableTone = TONE_DIGIT[tonedChar] ?? '1';
 
         // Output each vowel's IPA phoneme
         for (const vc of vowelChars) {
           const ipaV = V2IPA[vc];
           if (ipaV && pm[ipaV]) ids.push(pm[ipaV][0]);
         }
-        // Output tone digit after nucleus
-        if (pm[tone]) ids.push(pm[tone][0]);
       }
 
       // 3. Final consonant (greedy longest match)
@@ -148,8 +160,16 @@ function textToPhonemeIds(text: string, config: TTSModelConfig): number[] {
 
       // Safety: skip any unrecognized character to avoid infinite loop
       if (!initFound && vowelChars.length === 0 && !finalFound) {
+        if (w[i] === 'z') {
+            addPhoneme('z');
+        }
         i++;
       }
+    }
+    
+    // 4. Output tone digit AFTER all phonemes in the syllable
+    if (syllableVowelFound && pm[currentSyllableTone]) {
+        ids.push(pm[currentSyllableTone][0]);
     }
 
     // Word boundary space (not after last word)

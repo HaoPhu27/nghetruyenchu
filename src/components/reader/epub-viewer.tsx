@@ -24,6 +24,11 @@ export function EpubViewer({ book, currentChapterHref, initialCfi, onLocationCha
 
     viewerRef.current.innerHTML = '';
 
+    // Clear old hooks that might belong to destroyed renditions to prevent crashes in StrictMode
+    if (book && (book as any).spine?.hooks?.content?.clear) {
+      (book as any).spine.hooks.content.clear();
+    }
+
     const rendition = book.renderTo(viewerRef.current, {
       width: '100%',
       height: '100%',
