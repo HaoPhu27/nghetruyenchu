@@ -9,89 +9,157 @@ ort.env.wasm.wasmPaths = '/wasm/';
 ort.env.wasm.numThreads = 1;
 ort.env.wasm.simd = true;
 
-// Vietnamese Grapheme-to-Phoneme (G2P) converter for Piper / ngochuyennew model
-const G2P_MAP: Record<string, string> = {
-  // Initial consonants
-  'ngh': 'ŋ', 'ng': 'ŋ', 'nh': 'ɲ', 'ch': 'c', 'ph': 'f', 'th': 't', 'tr': 't', 'kh': 'x', 'gh': 'ɣ', 'gi': 'z', 'qu': 'kw',
-  'b': 'ɓ', 'c': 'k', 'd': 'z', 'đ': 'ɗ', 'g': 'ɣ', 'h': 'h', 'k': 'k', 'l': 'l', 'm': 'm', 'n': 'n',
-  'p': 'p', 'q': 'k', 'r': 'z', 's': 's', 't': 't', 'v': 'v', 'x': 's',
+// ============================================================
+// VIETNAMESE GRAPHEME-TO-PHONEME (G2P) FOR PIPER TTS
+// Piper model uses eSpeak IPA phoneme IDs (single Unicode chars)
+// Tones encoded as digit characters: 1=ngang, 2=huyền, 3=hỏi, 4=ngã, 5=sắc, 6=nặng
+// Phoneme sequence: ^ [consonant_ipa*] [vowel_ipa+] [tone_digit] [final_cons_ipa*] [space] ... $
+// ============================================================
 
-  // Diphthongs & special vowels
-  'iê': 'iə', 'yê': 'iə', 'ia': 'iə', 'ya': 'iə',
-  'uô': 'uə', 'ua': 'uə',
-  'ươ': 'ɨə', 'ưa': 'ɨə',
-
-  // Single Vowels with tones (1: ngang, 2: huyền, 3: hỏi, 4: ngã, 5: sắc, 6: nặng)
-  'a': 'a', 'à': 'a2', 'á': 'a5', 'ả': 'a3', 'ã': 'a4', 'ạ': 'a6',
-  'ă': 'a', 'ằ': 'a2', 'ắ': 'a5', 'ẳ': 'a3', 'ẵ': 'a4', 'ặ': 'a6',
-  'â': 'ə', 'ầ': 'ə2', 'ấ': 'ə5', 'ẩ': 'ə3', 'ẫ': 'ə4', 'ậ': 'ə6',
-  'e': 'ɛ', 'è': 'ɛ2', 'é': 'ɛ5', 'ẻ': 'ɛ3', 'ẽ': 'ɛ4', 'ẹ': 'ɛ6',
-  'ê': 'e', 'ề': 'e2', 'ế': 'e5', 'ể': 'e3', 'ễ': 'e4', 'ệ': 'e6',
-  'i': 'i', 'ì': 'i2', 'í': 'i5', 'ỉ': 'i3', 'ĩ': 'i4', 'ị': 'i6',
-  'y': 'i', 'ỳ': 'i2', 'ý': 'i5', 'ỷ': 'i3', 'ỹ': 'i4', 'ỵ': 'i6',
-  'o': 'ɔ', 'ò': 'ɔ2', 'ó': 'ɔ5', 'ỏ': 'ɔ3', 'õ': 'ɔ4', 'ọ': 'ɔ6',
-  'ô': 'o', 'ồ': 'o2', 'ố': 'o5', 'ổ': 'o3', 'ỗ': 'o4', 'ộ': 'o6',
-  'ơ': 'ə', 'ờ': 'ə2', 'ớ': 'ə5', 'ở': 'ə3', 'ỡ': 'ə4', 'ợ': 'ə6',
-  'u': 'u', 'ù': 'u2', 'ú': 'u5', 'ủ': 'u3', 'ũ': 'u4', 'ụ': 'u6',
-  'ư': 'ɨ', 'ừ': 'ɨ2', 'ứ': 'ɨ5', 'ử': 'ɨ3', 'ữ': 'ɨ4', 'ự': 'ɨ6',
+// Toned vowel -> base IPA phoneme (single char, all in phoneme_id_map)
+const V2IPA: Record<string, string> = {
+  'a':'a','à':'a','á':'a','ả':'a','ã':'a','ạ':'a',
+  'ă':'a','ằ':'a','ắ':'a','ẳ':'a','ẵ':'a','ặ':'a',
+  'â':'ə','ầ':'ə','ấ':'ə','ẩ':'ə','ẫ':'ə','ậ':'ə',
+  'e':'ɛ','è':'ɛ','é':'ɛ','ẻ':'ɛ','ẽ':'ɛ','ẹ':'ɛ',
+  'ê':'e','ề':'e','ế':'e','ể':'e','ễ':'e','ệ':'e',
+  'i':'i','ì':'i','í':'i','ỉ':'i','ĩ':'i','ị':'i',
+  'y':'i','ỳ':'i','ý':'i','ỷ':'i','ỹ':'i','ỵ':'i',
+  'o':'ɔ','ò':'ɔ','ó':'ɔ','ỏ':'ɔ','õ':'ɔ','ọ':'ɔ',
+  'ô':'o','ồ':'o','ố':'o','ổ':'o','ỗ':'o','ộ':'o',
+  'ơ':'ə','ờ':'ə','ớ':'ə','ở':'ə','ỡ':'ə','ợ':'ə',
+  'u':'u','ù':'u','ú':'u','ủ':'u','ũ':'u','ụ':'u',
+  'ư':'ɨ','ừ':'ɨ','ứ':'ɨ','ử':'ɨ','ữ':'ɨ','ự':'ɨ',
 };
 
-function vietnameseToPhonemes(text: string): string {
-  let str = text.toLowerCase().trim();
-  const words = str.split(/\s+/);
-  const phonemes: string[] = [];
+// Toned vowel -> tone digit (Vietnamese 6 tones)
+const TONE_DIGIT: Record<string, string> = {
+  'a':'1','à':'2','á':'5','ả':'3','ã':'4','ạ':'6',
+  'ă':'1','ằ':'2','ắ':'5','ẳ':'3','ẵ':'4','ặ':'6',
+  'â':'1','ầ':'2','ấ':'5','ẩ':'3','ẫ':'4','ậ':'6',
+  'e':'1','è':'2','é':'5','ẻ':'3','ẽ':'4','ẹ':'6',
+  'ê':'1','ề':'2','ế':'5','ể':'3','ễ':'4','ệ':'6',
+  'i':'1','ì':'2','í':'5','ỉ':'3','ĩ':'4','ị':'6',
+  'y':'1','ỳ':'2','ý':'5','ỷ':'3','ỹ':'4','ỵ':'6',
+  'o':'1','ò':'2','ó':'5','ỏ':'3','õ':'4','ọ':'6',
+  'ô':'1','ồ':'2','ố':'5','ổ':'3','ỗ':'4','ộ':'6',
+  'ơ':'1','ờ':'2','ớ':'5','ở':'3','ỡ':'4','ợ':'6',
+  'u':'1','ù':'2','ú':'5','ủ':'3','ũ':'4','ụ':'6',
+  'ư':'1','ừ':'2','ứ':'5','ử':'3','ữ':'4','ự':'6',
+};
 
-  for (const word of words) {
-    let w = word.replace(/[^a-zàáảãạăằắẳẵặâầấẩẫậeèéẻẽẹêềếểễệiìíỉĩịoòóỏõọôồốổỗộơờớởỡợuùúủũụưừứửữựyỳýỷỹỵđ]/g, '');
-    if (!w) continue;
+// Initial consonant clusters -> IPA (greedy longest-match)
+const INIT_CONS: [string, string][] = [
+  ['ngh','ŋ'],['ng','ŋ'],['nh','ɲ'],['ch','c'],
+  ['ph','f'],['kh','x'],['gh','ɣ'],['gi','z'],['qu','k'],
+  ['tr','ʈ'],['th','tʰ'],
+  ['đ','ɗ'],['b','ɓ'],['c','k'],['d','z'],['g','ɣ'],
+  ['h','h'],['k','k'],['l','l'],['m','m'],['n','n'],
+  ['p','p'],['r','z'],['s','s'],['t','t'],['v','v'],['x','s'],
+];
 
-    let idx = 0;
-    let wordPhonemes: string[] = [];
-    while (idx < w.length) {
-      let matched = false;
-      for (const len of [3, 2, 1]) {
-        if (idx + len <= w.length) {
-          const sub = w.slice(idx, idx + len);
-          if (G2P_MAP[sub]) {
-            wordPhonemes.push(G2P_MAP[sub]);
-            idx += len;
-            matched = true;
-            break;
-          }
-        }
-      }
-      if (!matched) {
-        wordPhonemes.push(w[idx]);
-        idx++;
-      }
-    }
-    phonemes.push(wordPhonemes.join(''));
-  }
+// Final consonant clusters -> IPA (greedy longest-match)
+const FINAL_CONS: [string, string][] = [
+  ['ngh','ŋ'],['ng','ŋ'],['nh','ɲ'],['ch','c'],
+  ['m','m'],['n','n'],['c','k'],['p','p'],['t','t'],
+];
 
-  return phonemes.join(' ');
+function isVowel(c: string): boolean {
+  return V2IPA[c] !== undefined;
 }
 
-// Map character/phoneme string into array of phoneme ID numbers
+/**
+ * Convert Vietnamese text to a flat array of phoneme IDs for Piper TTS.
+ * Each word is processed syllable by syllable.
+ * Structure per syllable: [init_ipa*] [vowel_ipa+] [tone_digit] [final_ipa*]
+ */
 function textToPhonemeIds(text: string, config: TTSModelConfig): number[] {
-  const map = config.phoneme_id_map;
+  const pm = config.phoneme_id_map;
   const ids: number[] = [];
 
-  // Start symbol ^ (id 1)
-  if (map['^']) ids.push(...map['^']);
-
-  const phonemesStr = vietnameseToPhonemes(text);
-  for (let i = 0; i < phonemesStr.length; i++) {
-    const char = phonemesStr[i];
-    if (map[char]) {
-      ids.push(...map[char]);
-    } else if (map[' ']) {
-      // Fallback for unmapped chars to space
-      ids.push(...map[' ']);
+  function addPhoneme(ipaStr: string) {
+    for (const ch of ipaStr) {
+      if (pm[ch]) ids.push(pm[ch][0]);
     }
   }
 
-  // End symbol $ (id 2)
-  if (map['$']) ids.push(...map['$']);
+  // Start boundary
+  if (pm['^']) ids.push(pm['^'][0]);
+
+  const words = text.toLowerCase().trim().split(/\s+/);
+
+  for (let wi = 0; wi < words.length; wi++) {
+    const word = words[wi];
+    // Strip non-Vietnamese characters
+    const cleanWord = word.replace(/[^a-zàáảãạăằắẳẵặâầấẩẫậeèéẻẽẹêềếểễệiìíỉĩịoòóỏõọôồốổỗộơờớởỡợuùúủũụưừứửữựyỳýỷỹỵđ]/g, '');
+    if (!cleanWord) continue;
+
+    let i = 0;
+    const w = cleanWord;
+
+    // Process word character by character (syllable components)
+    while (i < w.length) {
+      // 1. Initial consonant (greedy longest match, must not start with vowel)
+      let initFound = false;
+      for (const [graph, ipa] of INIT_CONS) {
+        if (i + graph.length <= w.length &&
+          w.slice(i, i + graph.length) === graph &&
+          !isVowel(graph[0])) {
+          addPhoneme(ipa);
+          i += graph.length;
+          initFound = true;
+          break;
+        }
+      }
+
+      // 2. Vowel nucleus: collect all consecutive vowel characters
+      const vowelChars: string[] = [];
+      while (i < w.length && isVowel(w[i])) {
+        vowelChars.push(w[i]);
+        i++;
+      }
+
+      if (vowelChars.length > 0) {
+        // Determine tone from the marked character
+        const tonedChar = vowelChars.find(c => TONE_DIGIT[c] && TONE_DIGIT[c] !== '1') ?? vowelChars[0];
+        const tone = TONE_DIGIT[tonedChar] ?? '1';
+
+        // Output each vowel's IPA phoneme
+        for (const vc of vowelChars) {
+          const ipaV = V2IPA[vc];
+          if (ipaV && pm[ipaV]) ids.push(pm[ipaV][0]);
+        }
+        // Output tone digit after nucleus
+        if (pm[tone]) ids.push(pm[tone][0]);
+      }
+
+      // 3. Final consonant (greedy longest match)
+      let finalFound = false;
+      for (const [graph, ipa] of FINAL_CONS) {
+        if (i + graph.length <= w.length &&
+          w.slice(i, i + graph.length) === graph &&
+          !isVowel(graph[0])) {
+          addPhoneme(ipa);
+          i += graph.length;
+          finalFound = true;
+          break;
+        }
+      }
+
+      // Safety: skip any unrecognized character to avoid infinite loop
+      if (!initFound && vowelChars.length === 0 && !finalFound) {
+        i++;
+      }
+    }
+
+    // Word boundary space (not after last word)
+    if (wi < words.length - 1 && pm[' ']) {
+      ids.push(pm[' '][0]);
+    }
+  }
+
+  // End boundary
+  if (pm['$']) ids.push(pm['$'][0]);
 
   return ids;
 }
@@ -108,7 +176,7 @@ self.onmessage = async (event: MessageEvent<WorkerInMessage>) => {
       }
       modelConfig = (await configRes.json()) as TTSModelConfig;
 
-      // Fetch ONNX model binary directly as ArrayBuffer to avoid memory duplication
+      // Fetch ONNX model binary directly as ArrayBuffer
       const modelRes = await fetch(msg.modelUrl);
       if (!modelRes.ok) {
         throw new Error(`Không thể tải mô hình giọng đọc (${modelRes.status})`);
@@ -138,7 +206,8 @@ self.onmessage = async (event: MessageEvent<WorkerInMessage>) => {
 
     try {
       const phonemeIds = textToPhonemeIds(msg.text, modelConfig);
-      if (phonemeIds.length === 0) {
+      if (phonemeIds.length <= 2) {
+        // Only boundary tokens, skip empty sentence
         postMessage({
           type: 'audio',
           id: msg.id,
@@ -164,31 +233,14 @@ self.onmessage = async (event: MessageEvent<WorkerInMessage>) => {
         [3]
       );
 
-      const feeds: Record<string, ort.Tensor> = {};
-      const inputNames = session.inputNames;
-
-      for (const name of inputNames) {
-        if (name === 'input' || name === 'text') {
-          feeds[name] = inputTensor;
-        } else if (name === 'input_lengths' || name === 'text_lengths') {
-          feeds[name] = inputLengthsTensor;
-        } else if (name === 'scales') {
-          feeds[name] = scalesTensor;
-        } else if (name === 'sid') {
-          feeds[name] = new ort.Tensor('int64', BigInt64Array.from([BigInt(0)]), [1]);
-        }
-      }
-
-      if (Object.keys(feeds).length === 0) {
-        feeds['input'] = inputTensor;
-        feeds['input_lengths'] = inputLengthsTensor;
-        feeds['scales'] = scalesTensor;
-      }
-
-      const results = await session.run(feeds);
+      const results = await session.run({
+        input: inputTensor,
+        input_lengths: inputLengthsTensor,
+        scales: scalesTensor,
+      });
 
       // Extract output audio Float32Array
-      const outputTensor = results.output || Object.values(results)[0];
+      const outputTensor = results.output ?? Object.values(results)[0];
       const audioBuffer = outputTensor.data as Float32Array;
 
       (postMessage as (message: unknown, transfer?: Transferable[]) => void)(
