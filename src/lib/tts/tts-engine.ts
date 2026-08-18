@@ -72,8 +72,7 @@ class TTSEngine {
     this.initAudioContext();
     this.stopPlayback();
 
-    useTTSStore.getState().setSentences(sentences, chapterTitle);
-    useTTSStore.getState().setCurrentSentenceIndex(startIndex);
+    useTTSStore.getState().setSentences(sentences, chapterTitle, startIndex);
     useTTSStore.getState().setIsPlaying(true);
 
     this.sentenceQueue = sentences.map((text, idx) => ({ id: idx, text }));

@@ -89,10 +89,17 @@ export default function ReaderPage({ params }: PageProps) {
 
   // Restore saved chapter index when progress loads
   useEffect(() => {
-    if (progress && progress.chapter_index) {
+    if (progress && typeof progress.chapter_index === 'number') {
       setCurrentChapterIndex(progress.chapter_index);
     }
   }, [progress]);
+
+  // Continuously sync active sentence progress to session and local storage
+  useEffect(() => {
+    if (currentSentenceIndex >= 0) {
+      updateProgress(null, currentChapterIndex, currentSentenceIndex);
+    }
+  }, [currentSentenceIndex, currentChapterIndex, updateProgress]);
 
   // Load chapter text and start TTS playback
   const handleStartTTSForCurrentChapter = useCallback(async () => {
@@ -105,9 +112,16 @@ export default function ReaderPage({ params }: PageProps) {
     const sentences = splitIntoSentences(cleanedText);
 
     if (sentences.length > 0) {
-      playChapter(sentences, 0, currentChap.title);
+      // Resume from saved sentence index if on the same chapter
+      let startIndex = 0;
+      if (progress && progress.chapter_index === currentChapterIndex && typeof progress.tts_sentence_index === 'number') {
+        startIndex = Math.min(Math.max(0, progress.tts_sentence_index), sentences.length - 1);
+      } else if (currentSentenceIndex > 0 && currentSentenceIndex < sentences.length) {
+        startIndex = currentSentenceIndex;
+      }
+      playChapter(sentences, startIndex, currentChap.title);
     }
-  }, [book, chapters, currentChapterIndex, playChapter]);
+  }, [book, chapters, currentChapterIndex, playChapter, progress, currentSentenceIndex]);
 
   // Handle location/CFI changes from reader viewer
   const handleLocationChange = (cfi: string) => {
@@ -116,7 +130,9 @@ export default function ReaderPage({ params }: PageProps) {
 
   const handleSelectChapter = (chap: ChapterItem) => {
     setCurrentChapterIndex(chap.index);
-    updateProgress(null, chap.index, 0, true);
+    const isSameChapter = progress?.chapter_index === chap.index;
+    const nextSentenceIndex = isSameChapter ? (progress?.tts_sentence_index || 0) : 0;
+    updateProgress(null, chap.index, nextSentenceIndex, true);
   };
 
   const handlePrevChapter = () => {

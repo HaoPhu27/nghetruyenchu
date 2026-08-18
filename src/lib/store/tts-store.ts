@@ -16,7 +16,7 @@ interface TTSState {
   volume: number; // 0.0 to 1.0
 
   setModelStatus: (status: ModelStatus, progress?: number, error?: string | null) => void;
-  setSentences: (sentences: string[], chapterTitle?: string) => void;
+  setSentences: (sentences: string[], chapterTitle?: string, initialIndex?: number) => void;
   setCurrentSentenceIndex: (index: number) => void;
   setIsPlaying: (isPlaying: boolean) => void;
   setIsPaused: (isPaused: boolean) => void;
@@ -45,11 +45,11 @@ export const useTTSStore = create<TTSState>((set) => ({
       errorMessage: error,
     }),
 
-  setSentences: (sentences, chapterTitle = '') =>
+  setSentences: (sentences, chapterTitle = '', initialIndex = 0) =>
     set({
       sentences,
       currentChapterTitle: chapterTitle,
-      currentSentenceIndex: 0,
+      currentSentenceIndex: initialIndex,
     }),
 
   setCurrentSentenceIndex: (currentSentenceIndex) => set({ currentSentenceIndex }),
