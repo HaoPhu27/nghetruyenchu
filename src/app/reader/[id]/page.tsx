@@ -43,7 +43,7 @@ export default function ReaderPage({ params }: PageProps) {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   const { progress, updateProgress } = useReadingProgress(id);
-  const { playChapter, currentSentenceIndex } = useTTS();
+  const { playChapter, currentSentenceIndex, isPlaying } = useTTS();
 
   // 1. Fetch novel data & parse EPUB ArrayBuffer
   useEffect(() => {
@@ -87,19 +87,25 @@ export default function ReaderPage({ params }: PageProps) {
     };
   }, [id]);
 
-  // Restore saved chapter index when progress loads
+  // Restore saved chapter index when progress loads, or default to chapter 1 if chapter 0 is TOC
   useEffect(() => {
     if (progress && typeof progress.chapter_index === 'number') {
-      setCurrentChapterIndex(progress.chapter_index);
+      if (progress.chapter_index === 0 && chapters.length > 1 && (chapters[0]?.title?.toLowerCase().includes('mục lục') || chapters[0]?.href?.toLowerCase().includes('toc'))) {
+        setCurrentChapterIndex(1);
+      } else {
+        setCurrentChapterIndex(progress.chapter_index);
+      }
+    } else if (chapters.length > 1 && (chapters[0]?.title?.toLowerCase().includes('mục lục') || chapters[0]?.href?.toLowerCase().includes('toc'))) {
+      setCurrentChapterIndex(1);
     }
-  }, [progress]);
+  }, [progress, chapters]);
 
-  // Continuously sync active sentence progress to session and local storage
+  // Continuously sync active sentence progress to session and local storage only during playback
   useEffect(() => {
-    if (currentSentenceIndex >= 0) {
+    if (isPlaying && currentSentenceIndex >= 0) {
       updateProgress(null, currentChapterIndex, currentSentenceIndex);
     }
-  }, [currentSentenceIndex, currentChapterIndex, updateProgress]);
+  }, [isPlaying, currentSentenceIndex, currentChapterIndex, updateProgress]);
 
   // Load chapter text and start TTS playback
   const handleStartTTSForCurrentChapter = useCallback(async () => {
@@ -127,6 +133,23 @@ export default function ReaderPage({ params }: PageProps) {
   const handleLocationChange = (cfi: string) => {
     updateProgress(cfi, currentChapterIndex, currentSentenceIndex);
   };
+
+  // Sync currentChapterIndex when reader navigates internally
+  const handleSectionDisplayed = useCallback(
+    (href: string) => {
+      if (!href || chapters.length === 0) return;
+      const clean = href.split('?')[0].split('#')[0].replace(/^(\.\.\/|\.\/|\/)+/, '');
+      const foundIdx = chapters.findIndex((c) => {
+        const cClean = c.href.split('?')[0].split('#')[0].replace(/^(\.\.\/|\.\/|\/)+/, '');
+        return cClean === clean || clean.endsWith(cClean) || cClean.endsWith(clean);
+      });
+      if (foundIdx >= 0) {
+        setCurrentChapterIndex(foundIdx);
+        updateProgress(null, foundIdx, 0);
+      }
+    },
+    [chapters, updateProgress]
+  );
 
   const handleSelectChapter = (chap: ChapterItem) => {
     setCurrentChapterIndex(chap.index);
@@ -247,6 +270,7 @@ export default function ReaderPage({ params }: PageProps) {
             currentChapterHref={currentChapter?.href}
             initialCfi={progress?.location_cfi}
             onLocationChange={handleLocationChange}
+            onSectionDisplayed={handleSectionDisplayed}
           />
         </div>
       </main>

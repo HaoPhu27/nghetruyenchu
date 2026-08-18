@@ -1,4 +1,5 @@
 import ePub, { Book, NavItem } from 'epubjs';
+import '@/lib/epub/epub-patch';
 import { ParsedBook, ChapterItem } from '@/types';
 
 export async function parseEpubFile(fileBuffer: ArrayBuffer): Promise<{
@@ -7,6 +8,43 @@ export async function parseEpubFile(fileBuffer: ArrayBuffer): Promise<{
 }> {
   const book = ePub(fileBuffer);
   await book.ready;
+
+  // Patch book.spine.get to be resilient to relative paths (e.g. "../Text/C1.xhtml"), fragments, and filename lookups
+  if (book.spine) {
+    const originalSpineGet = book.spine.get.bind(book.spine);
+    book.spine.get = function (target: string | number) {
+      if (typeof target === 'undefined' || target === null) return originalSpineGet(target);
+
+      let section = originalSpineGet(target);
+      if (section) return section;
+
+      if (typeof target === 'string') {
+        const clean = target.split('?')[0].split('#')[0].replace(/^(\.\.\/|\.\/|\/)+/, '');
+        section = originalSpineGet(clean);
+        if (section) return section;
+
+        const filename = clean.split('/').pop();
+        if (filename) {
+          const found = this.spineItems.find(
+            (s: any) =>
+              s.href === filename ||
+              s.href?.endsWith('/' + filename) ||
+              s.idref === filename ||
+              s.idref === filename.replace(/\.[^/.]+$/, '')
+          );
+          if (found) return found;
+        }
+
+        try {
+          const decoded = decodeURIComponent(clean);
+          section = originalSpineGet(decoded);
+          if (section) return section;
+        } catch {}
+      }
+
+      return null;
+    };
+  }
 
   const meta = await book.loaded.metadata;
   const navigation = await book.loaded.navigation;
@@ -81,21 +119,22 @@ export async function getChapterText(book: Book, href: string): Promise<string> 
     const loadedSection = await section.load(book.load.bind(book));
     if (!loadedSection) return '';
 
+    let doc: Document | null = null;
     if (typeof loadedSection === 'string') {
-      const doc = new DOMParser().parseFromString(loadedSection, 'text/html');
-      return doc.body?.textContent || doc.body?.innerText || '';
+      doc = new DOMParser().parseFromString(loadedSection, 'text/html');
+    } else if (typeof document !== 'undefined') {
+      if (loadedSection instanceof Document) {
+        doc = loadedSection;
+      } else if ((loadedSection as Element)?.outerHTML) {
+        doc = new DOMParser().parseFromString((loadedSection as Element).outerHTML, 'text/html');
+      }
     }
 
-    if (typeof document !== 'undefined') {
-      if (loadedSection instanceof Document || (loadedSection as Document).body) {
-        const doc = loadedSection as Document;
-        return doc.body?.textContent || doc.body?.innerText || doc.documentElement?.textContent || '';
-      }
-
-      if ((loadedSection as Element).outerHTML) {
-        const doc = new DOMParser().parseFromString((loadedSection as Element).outerHTML, 'text/html');
-        return doc.body?.textContent || '';
-      }
+    if (doc) {
+      // Remove scripts and styles
+      doc.querySelectorAll('script, style, head').forEach((el) => el.remove());
+      const raw = doc.body?.textContent || doc.body?.innerText || doc.documentElement?.textContent || '';
+      return raw.trim();
     }
 
     return '';
